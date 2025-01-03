@@ -1,10 +1,11 @@
 # xchain-calls
 
 - [x] deploy script (rust or sol?)
-- [ ] generate valid intent in solidity
-- [ ] generate valid intent in TS
-- [ ] check against smart contracts
+- [ ] generate valid order in solidity
+- [ ] generate valid order in TS
 - [ ] filler service
+
+- [ ] try 7702 delegation against anvil via cask
 
 ## demo goals
 - users can use funds on an origin chain to make calls (with their EOA as msg.sender) on a target chain

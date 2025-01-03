@@ -9,8 +9,8 @@ import {CallByUser} from "./Structs.sol";
  */
 library ResolvedCrossChainOrderLib {
     // Returns a unique representation of the ERC7683 resolved cross chain order. The resolved cross chain order's
-    // originData contains a CallByUser struct which contains a nonce, so the user can guarantee t
-    // his order is unique by using the nonce+user combination.
+    // originData contains a CallByUser struct which contains a nonce, so the user can guarantee
+    // this order is unique by using the nonce+user combination.
     function getOrderId(CallByUser memory calls) internal pure returns (bytes32) {
         return keccak256(abi.encode(calls));
     }

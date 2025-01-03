@@ -29,7 +29,7 @@ contract OriginSettler is ReentrancyGuard {
 
     event Requested7702Delegation(EIP7702AuthData authData);
 
-    bytes32 immutable ORDER_DATA_TYPE_HASH = keccak256("TODO");
+    bytes32 public immutable ORDER_DATA_TYPE_HASH = keccak256("TODO");
 
     mapping(bytes32 => Asset) public pendingOrders;
 
@@ -41,7 +41,7 @@ contract OriginSettler is ReentrancyGuard {
         (ResolvedCrossChainOrder memory resolvedOrder,, EIP7702AuthData memory authData, Asset memory inputAsset) =
             _resolve(order);
 
-        require(pendingOrders[resolvedOrder.orderId].amount > 0, "Order already pending");
+        require(pendingOrders[resolvedOrder.orderId].amount == 0, "Order already pending");
         pendingOrders[resolvedOrder.orderId] = inputAsset;
 
         // TODO: Assets should only be releaseable to the filler
