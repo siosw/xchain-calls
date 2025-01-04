@@ -23,6 +23,8 @@ import {
 
 contract OriginSettlerTest is Test {
 
+	uint256 immutable AMOUNT = 100 * 1e18;
+
 	OriginSettler origin;
 	address token;
 	Vm.Wallet user;
@@ -32,21 +34,21 @@ contract OriginSettlerTest is Test {
 
 		token = address(deployMockERC20("Test Token", "TT", 18));
 		user = vm.createWallet("User");
-		deal(token, user.addr, 100 * 1e18, true);
+		deal(token, user.addr, AMOUNT, true);
 	}
 
 	function test_OnchainOrder() public {
 		Call[] memory calls = new Call[](1);
-		calls[0] = Call(address(0), "", 0);
+		calls[0] = Call(address(0xdead), "", 0);
 
-		Asset memory asset = Asset(token, 10 * 1e18);
+		Asset memory asset = Asset(token, AMOUNT);
 		vm.prank(user.addr);
-		IERC20(token).approve(address(origin), 10 * 1e18);
+		IERC20(token).approve(address(origin), AMOUNT);
 
-		CallByUser memory callByUser = CallByUser(address(0), 0, asset, 1, "", calls);
+		CallByUser memory callByUser = CallByUser(address(0xdead), 0, asset, 1, "", calls);
 
 		Authorization[] memory authlist = new Authorization[](1);
-		authlist[0] = Authorization(1, address(0), 0, "");
+		authlist[0] = Authorization(1, address(0xdead), 0, "");
 		
 		EIP7702AuthData memory authData = EIP7702AuthData(authlist);
 
@@ -64,11 +66,15 @@ contract OriginSettlerTest is Test {
 			orderData
 		);
 
+		vm.assertEq(IERC20(token).balanceOf(user.addr), AMOUNT);
+
+		// TODO: assert correct events are emitted
 		vm.prank(user.addr);
 		origin.open(order);
 
-		// TODO: assert funds are held by OriginSettler
-		// correct events are emitted
+		vm.assertEq(IERC20(token).balanceOf(user.addr), 0);
+		vm.assertEq(IERC20(token).balanceOf(address(origin)), AMOUNT);
+
 	}
 }
 
