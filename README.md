@@ -1,11 +1,10 @@
 # xchain-calls
 
 - [x] deploy script (rust or sol?)
+- [x] try 7702 delegation against anvil via cask
 - [ ] generate valid order in solidity
 - [ ] generate valid order in TS
 - [ ] filler service
-
-- [ ] try 7702 delegation against anvil via cask
 
 ## demo goals
 - users can use funds on an origin chain to make calls (with their EOA as msg.sender) on a target chain
@@ -23,4 +22,4 @@
 ## next steps
 - gasless orders w/ permit2
 - better oracle / settlement
-- practical demo application 
+- practical demo application

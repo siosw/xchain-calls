@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {Test, Vm} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import {XAccount} from "../src/XAccount.sol";
 import {OriginSettler} from "../src/OriginSettler.sol";
 import {
     OnchainCrossChainOrder,
@@ -25,11 +26,13 @@ contract OriginSettlerTest is Test {
 
 	uint256 immutable AMOUNT = 100 * 1e18;
 
+	XAccount account;
 	OriginSettler origin;
 	address token;
 	Vm.Wallet user;
 
 	function setUp() public {
+		account = new XAccount();
 		origin = new OriginSettler();
 
 		token = address(deployMockERC20("Test Token", "TT", 18));
@@ -75,6 +78,22 @@ contract OriginSettlerTest is Test {
 		vm.assertEq(IERC20(token).balanceOf(user.addr), 0);
 		vm.assertEq(IERC20(token).balanceOf(address(origin)), AMOUNT);
 
+	}
+
+	function createOrder() public {
+		uint256 chainId = 31337;
+		address codeAddress = address(account);
+		uint256 nonce = 0;
+
+		bytes32 digest = keccak256(abi.encode(chainId, codeAddress, nonce));
+
+		vm.sign(user, digest);
+
+		Authorization[] memory authlist = new Authorization[](1);
+
+		authlist[0] = Authorization(1, address(0xdead), 0, "");
+		
+		EIP7702AuthData memory authData = EIP7702AuthData(authlist);
 	}
 }
 
