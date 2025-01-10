@@ -41,19 +41,15 @@ sol!(
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // TODO: issue with anvil / typed hardforks
-
     // TODO:
     // - [x] submit order
-    // - [ ] listen for submitted orders
-    // - [ ] execute call against settler
+    // - [x] listen for submitted orders
+    // - [ ] execute call against settler (with auth data delegation)
     // - [ ] refactor into separate services
 
     let provider = ProviderBuilder::new()
         .with_recommended_fillers()
-        .on_anvil_with_wallet_and_config(|anvil| {
-            anvil.arg("--hardfork").arg("prague").arg("-vvvv")
-        });
+        .on_anvil_with_wallet_and_config(|anvil| anvil.arg("--hardfork").arg("prague"));
 
     let token = MockERC20::deploy(&provider).await?;
     println!("deployed ERC20 on address: {}", token.address());
@@ -67,8 +63,20 @@ async fn main() -> eyre::Result<()> {
     let open_filter = origin.Open_filter().watch().await?;
     let open_listener = open_filter.into_stream().take(1).for_each(|log| async {
         match log {
-            Ok((_event, log)) => {
-                println!("Received Open: {log:?}");
+            Ok((_event, _log)) => {
+                println!("received open event");
+            }
+            Err(e) => {
+                println!("Error: {e:?}");
+            }
+        }
+    });
+
+    let auth_filter = origin.Requested7702Delegation_filter().watch().await?;
+    let auth_listener = auth_filter.into_stream().take(1).for_each(|log| async {
+        match log {
+            Ok((_event, _log)) => {
+                println!("received auth event");
             }
             Err(e) => {
                 println!("Error: {e:?}");
@@ -84,6 +92,7 @@ async fn main() -> eyre::Result<()> {
     )
     .await?;
     open_listener.await;
+    auth_listener.await;
 
     Ok(())
 }
