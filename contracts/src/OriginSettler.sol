@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
+import {console} from "forge-std/Test.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -38,8 +39,10 @@ contract OriginSettler is ReentrancyGuard {
     /// @dev This method must emit the Open event
     /// @param order The OnchainCrossChainOrder definition
     function open(OnchainCrossChainOrder calldata order) external nonReentrant {
+        console.log("resolving order");
         (ResolvedCrossChainOrder memory resolvedOrder,, EIP7702AuthData memory authData, Asset memory inputAsset) =
             _resolve(order);
+        console.log("resolved order!");
 
         require(pendingOrders[resolvedOrder.orderId].amount == 0, "Order already pending");
         pendingOrders[resolvedOrder.orderId] = inputAsset;
@@ -140,7 +143,9 @@ contract OriginSettler is ReentrancyGuard {
             revert WrongOrderDataType();
         }
 
+        console.log("decoding order data");
         (calls, authData, inputAsset) = decode7683OrderData(order.orderData);
+        console.log("decoded!");
 
         (Output[] memory maxSpent, Output[] memory minReceived, FillInstruction[] memory fillInstructions) =
             _resolveCommonStructs(calls, inputAsset);

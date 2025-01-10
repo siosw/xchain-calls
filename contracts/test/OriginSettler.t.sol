@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import {Test, Vm} from "forge-std/Test.sol";
+import {Test, Vm, console} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {XAccount} from "../src/XAccount.sol";
@@ -23,8 +23,8 @@ import {
 } from "../src/Structs.sol";
 
 contract OriginSettlerTest is Test {
-
-	uint256 immutable AMOUNT = 100 * 1e18;
+	// uint256 immutable AMOUNT = 100 * 1e18;
+	uint256 immutable AMOUNT = 0;
 
 	XAccount account;
 	OriginSettler origin;
@@ -42,21 +42,38 @@ contract OriginSettlerTest is Test {
 
 	function test_OnchainOrder() public {
 		Call[] memory calls = new Call[](1);
-		calls[0] = Call(address(0xdead), "", 0);
+		calls[0] = Call(address(0), "", 0);
 
 		Asset memory asset = Asset(token, AMOUNT);
 		vm.prank(user.addr);
 		IERC20(token).approve(address(origin), AMOUNT);
 
-		CallByUser memory callByUser = CallByUser(address(0xdead), 0, asset, 1, "", calls);
+		CallByUser memory callByUser = CallByUser(address(0), 0, asset, 1, "", calls);
 
 		Authorization[] memory authlist = new Authorization[](1);
-		authlist[0] = Authorization(1, address(0xdead), 0, "");
+		authlist[0] = Authorization(1, address(account), 0, "");
 		
 		EIP7702AuthData memory authData = EIP7702AuthData(authlist);
 
-		bytes memory orderData = abi.encode(callByUser, authData, asset);
+		bytes memory userEncoded = abi.encode(callByUser);
+		console.log("callByUser");
+		console.log(userEncoded.length);
+		console.logBytes(userEncoded);
 
+		bytes memory authEncoded = abi.encode(authData);
+		console.log("authData");
+		console.log(authEncoded.length);
+		console.logBytes(authEncoded);
+
+		bytes memory assetEncoded = abi.encode(asset);
+		console.log("assetData");
+		console.log(assetEncoded.length);
+		console.logBytes(assetEncoded);
+
+		bytes memory orderData = abi.encode(callByUser, authData, asset);
+		console.log("orderData");
+		console.log(orderData.length);
+		console.logBytes(orderData);
 
 		bytes32 orderId = keccak256(abi.encode(calls));
 
