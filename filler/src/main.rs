@@ -1,10 +1,10 @@
 use std::u32;
 
-use futures_util::StreamExt;
+use eyre::OptionExt;
 
 use alloy::{
-    network::Network,
-    primitives::{Address, Bytes, U256},
+    network::{Ethereum, Network},
+    primitives::{Address, Bytes, FixedBytes, U256},
     providers::{Provider, ProviderBuilder},
     sol,
     sol_types::SolValue,
@@ -60,39 +60,39 @@ async fn main() -> eyre::Result<()> {
     let origin = OriginSettler::deploy(&provider).await?;
     println!("deployed OriginSettler on address: {}", origin.address());
 
-    let open_filter = origin.Open_filter().watch().await?;
-    let open_listener = open_filter.into_stream().take(1).for_each(|log| async {
-        match log {
-            Ok((_event, _log)) => {
-                println!("received open event");
-            }
-            Err(e) => {
-                println!("Error: {e:?}");
-            }
-        }
-    });
+    //let open_filter = origin.Open_filter().watch().await?;
+    //let open_listener = open_filter.into_stream().take(1).for_each(|log| async {
+    //    match log {
+    //        Ok((_event, _log)) => {
+    //            println!("received open event");
+    //        }
+    //        Err(e) => {
+    //            println!("Error: {e:?}");
+    //        }
+    //    }
+    //});
+    //
+    //let auth_filter = origin.Requested7702Delegation_filter().watch().await?;
+    //let auth_listener = auth_filter.into_stream().take(1).for_each(|log| async {
+    //    match log {
+    //        Ok((_event, _log)) => {
+    //            println!("received auth event");
+    //        }
+    //        Err(e) => {
+    //            println!("Error: {e:?}");
+    //        }
+    //    }
+    //});
 
-    let auth_filter = origin.Requested7702Delegation_filter().watch().await?;
-    let auth_listener = auth_filter.into_stream().take(1).for_each(|log| async {
-        match log {
-            Ok((_event, _log)) => {
-                println!("received auth event");
-            }
-            Err(e) => {
-                println!("Error: {e:?}");
-            }
-        }
-    });
-
-    submit_order(
+    let tx_hash = submit_order(
         &provider,
         *origin.address(),
         *token.address(),
         *x_account.address(),
     )
     .await?;
-    open_listener.await;
-    auth_listener.await;
+
+    fill_order(tx_hash, &provider).await?;
 
     Ok(())
 }
@@ -102,7 +102,7 @@ async fn submit_order<P, T, N>(
     origin: Address,
     token: Address,
     x_account: Address,
-) -> eyre::Result<()>
+) -> eyre::Result<FixedBytes<32>>
 where
     P: Provider<T, N>,
     T: Transport + Clone,
@@ -152,5 +152,28 @@ where
     let builder = origin.open(order);
     let tx_hash = builder.send().await?.watch().await?;
     println!("opened order with tx hash: {}", tx_hash);
+
+    Ok(tx_hash)
+}
+
+async fn fill_order<P, T>(tx_hash: FixedBytes<32>, provider: &P) -> eyre::Result<()>
+where
+    P: Provider<T, Ethereum>,
+    T: Transport + Clone,
+{
+    let tx = provider
+        .get_transaction_receipt(tx_hash)
+        .await?
+        .ok_or_eyre("tx not found")?;
+
+    // TODO: get order and authlist from tx
+    let logs = tx.inner.logs();
+    println!("total number of events: {:?}", logs.len());
+    for log in logs {
+        println!("\tevent from addr: {}", log.inner.address);
+    }
+
+    // TODO: submit tx to destination chain
+
     Ok(())
 }
