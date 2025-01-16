@@ -184,7 +184,9 @@ where
                     .into_transaction_request()
                     .with_authorization_list(delegation.try_into()?);
 
-                println!("{:?}", tx);
+                let pending_tx = provider.send_transaction(tx).await?;
+
+                println!("{:?}", pending_tx.tx_hash());
             }
         }
     }
