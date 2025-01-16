@@ -1,43 +1,21 @@
 use std::u32;
 
+use bindings::{DestinationSettler, MockERC20, OriginSettler, XAccount};
 use eyre::OptionExt;
 
 use alloy::{
-    network::{Ethereum, Network},
+    eips::eip7702::Authorization,
+    network::{Ethereum, EthereumWallet, Network, TransactionBuilder7702},
+    node_bindings::Anvil,
     primitives::{Address, Bytes, FixedBytes, U256},
     providers::{Provider, ProviderBuilder},
-    sol,
-    sol_types::SolValue,
+    signers::{local::PrivateKeySigner, Signer},
+    sol_types::{SolEvent, SolValue},
     transports::Transport,
 };
+use OriginSettler::{EIP7702AuthData, ResolvedCrossChainOrder};
 
-sol!(
-    #[allow(missing_docs)]
-    #[sol(rpc)]
-    MockERC20,
-    "../contracts/out/MockERC20.sol/MockERC20.json"
-);
-
-sol!(
-    #[allow(missing_docs)]
-    #[sol(rpc)]
-    OriginSettler,
-    "../contracts/out/OriginSettler.sol/OriginSettler.json"
-);
-
-sol!(
-    #[allow(missing_docs)]
-    #[sol(rpc)]
-    DestinationSettler,
-    "../contracts/out/DestinationSettler.sol/DestinationSettler.json"
-);
-
-sol!(
-    #[allow(missing_docs)]
-    #[sol(rpc)]
-    XAccount,
-    "../contracts/out/XAccount.sol/XAccount.json"
-);
+mod bindings;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -46,10 +24,19 @@ async fn main() -> eyre::Result<()> {
     // - [x] listen for submitted orders
     // - [ ] execute call against settler (with auth data delegation)
     // - [ ] refactor into separate services
+    //
 
+    let anvil = Anvil::new().arg("--hardfork").arg("prague").try_spawn()?;
+    let alice: PrivateKeySigner = anvil.keys()[0].clone().into();
+    let bob: PrivateKeySigner = anvil.keys()[1].clone().into();
+
+    // Create a provider with the wallet for only Bob (not Alice).
+    let rpc_url = anvil.endpoint_url();
+    let wallet = EthereumWallet::from(bob.clone());
     let provider = ProviderBuilder::new()
         .with_recommended_fillers()
-        .on_anvil_with_wallet_and_config(|anvil| anvil.arg("--hardfork").arg("prague"));
+        .wallet(wallet)
+        .on_http(rpc_url);
 
     let token = MockERC20::deploy(&provider).await?;
     println!("deployed ERC20 on address: {}", token.address());
@@ -60,45 +47,29 @@ async fn main() -> eyre::Result<()> {
     let origin = OriginSettler::deploy(&provider).await?;
     println!("deployed OriginSettler on address: {}", origin.address());
 
-    //let open_filter = origin.Open_filter().watch().await?;
-    //let open_listener = open_filter.into_stream().take(1).for_each(|log| async {
-    //    match log {
-    //        Ok((_event, _log)) => {
-    //            println!("received open event");
-    //        }
-    //        Err(e) => {
-    //            println!("Error: {e:?}");
-    //        }
-    //    }
-    //});
-    //
-    //let auth_filter = origin.Requested7702Delegation_filter().watch().await?;
-    //let auth_listener = auth_filter.into_stream().take(1).for_each(|log| async {
-    //    match log {
-    //        Ok((_event, _log)) => {
-    //            println!("received auth event");
-    //        }
-    //        Err(e) => {
-    //            println!("Error: {e:?}");
-    //        }
-    //    }
-    //});
+    let destination = DestinationSettler::deploy(&provider).await?;
+    println!(
+        "deployed DestintionSettler on address: {}",
+        destination.address()
+    );
 
     let tx_hash = submit_order(
         &provider,
+        alice,
         *origin.address(),
         *token.address(),
         *x_account.address(),
     )
     .await?;
 
-    fill_order(tx_hash, &provider).await?;
+    fill_order(tx_hash, origin.address(), &provider).await?;
 
     Ok(())
 }
 
 async fn submit_order<P, T, N>(
     provider: P,
+    signer: PrivateKeySigner,
     origin: Address,
     token: Address,
     x_account: Address,
@@ -127,14 +98,16 @@ where
         calls: vec![call],
         signature: "".into(),
     };
-    let auth = OriginSettler::Authorization {
-        chainId: chain_id.try_into()?,
-        nonce: U256::ZERO,
-        signature: "".into(),
-        codeAddress: x_account,
+
+    let auth = Authorization {
+        address: x_account,
+        nonce: provider.get_transaction_count(signer.address()).await?,
+        chain_id: U256::from(chain_id),
     };
+    let signature = signer.sign_hash(&auth.signature_hash()).await?;
+    let auth = auth.into_signed(signature);
     let auth_data = OriginSettler::EIP7702AuthData {
-        authlist: vec![auth],
+        authlist: vec![auth.try_into()?],
     };
 
     let order_data: Bytes = (user_call, auth_data, asset).abi_encode_params().into();
@@ -156,11 +129,16 @@ where
     Ok(tx_hash)
 }
 
-async fn fill_order<P, T>(tx_hash: FixedBytes<32>, provider: &P) -> eyre::Result<()>
+async fn fill_order<P, T>(
+    tx_hash: FixedBytes<32>,
+    destination: &Address,
+    provider: &P,
+) -> eyre::Result<()>
 where
     P: Provider<T, Ethereum>,
     T: Transport + Clone,
 {
+    let destination = DestinationSettler::new(*destination, &provider);
     let tx = provider
         .get_transaction_receipt(tx_hash)
         .await?
@@ -169,11 +147,47 @@ where
     // TODO: get order and authlist from tx
     let logs = tx.inner.logs();
     println!("total number of events: {:?}", logs.len());
+
+    let mut id: Option<FixedBytes<32>> = None;
+    let mut order: Option<ResolvedCrossChainOrder> = None;
+    let mut delegation: Option<EIP7702AuthData> = None;
+
     for log in logs {
+        match log.topic0() {
+            Some(&OriginSettler::Open::SIGNATURE_HASH) => {
+                let OriginSettler::Open {
+                    orderId,
+                    resolvedOrder,
+                } = log.log_decode()?.inner.data;
+
+                println!("order id: {}", orderId);
+                id = Some(orderId);
+                order = Some(resolvedOrder);
+            }
+            Some(&OriginSettler::Requested7702Delegation::SIGNATURE_HASH) => {
+                let OriginSettler::Requested7702Delegation { authData } =
+                    log.log_decode()?.inner.data;
+                delegation = Some(authData);
+            }
+            Some(_) => {}
+            None => {}
+        };
         println!("\tevent from addr: {}", log.inner.address);
     }
 
-    // TODO: submit tx to destination chain
+    if let Some(order) = order {
+        if let Some(id) = id {
+            if let Some(delegation) = delegation {
+                // TODO: send fill tx
+                let tx = destination
+                    .fill(id, order.abi_encode_params().into(), "".into())
+                    .into_transaction_request()
+                    .with_authorization_list(delegation.try_into()?);
+
+                println!("{:?}", tx);
+            }
+        }
+    }
 
     Ok(())
 }
