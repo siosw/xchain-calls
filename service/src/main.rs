@@ -6,16 +6,15 @@ use eyre::OptionExt;
 
 use alloy::{
     eips::eip7702::Authorization,
-    network::{Ethereum, EthereumWallet, Network, TransactionBuilder7702},
+    network::{EthereumWallet, Network},
     node_bindings::Anvil,
     primitives::{Address, Bytes, FixedBytes, U256},
-    providers::{Provider, ProviderBuilder},
+    providers::{Provider, ProviderBuilder, WsConnect},
     signers::{local::PrivateKeySigner, Signer},
-    sol_types::{SolEvent, SolValue},
+    sol_types::SolValue,
     transports::Transport,
 };
 use filler::{Filler, Order};
-use OriginSettler::{EIP7702AuthData, ResolvedCrossChainOrder};
 
 mod bindings;
 mod calls;
@@ -24,20 +23,23 @@ mod filler;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // TODO:
-    // - [ ] long running filler service
+    // - [x] long running filler service
+    // - [ ] move current e2e flow into test
+    // - [ ] cli opts to: generate / fill orders / set up system
+    // - [ ] add logging
     // - [ ] submit issue for erc1271 & incorrect pending check
 
     let anvil = Anvil::new().arg("--hardfork").arg("prague").try_spawn()?;
     let alice: PrivateKeySigner = anvil.keys()[0].clone().into();
     let bob: PrivateKeySigner = anvil.keys()[1].clone().into();
 
-    // Create a provider with the wallet for only Bob (not Alice).
-    let rpc_url = anvil.endpoint_url();
+    let ws = WsConnect::new(anvil.ws_endpoint());
     let wallet = EthereumWallet::from(bob.clone());
     let provider = ProviderBuilder::new()
         .with_recommended_fillers()
         .wallet(wallet)
-        .on_http(rpc_url);
+        .on_ws(ws)
+        .await?;
 
     let token = MockERC20::deploy(&provider).await?;
     println!("deployed ERC20 on address: {}", token.address());
@@ -54,7 +56,7 @@ async fn main() -> eyre::Result<()> {
         destination.address()
     );
 
-    let tx_hash = submit_order(
+    let tx_hash = submit_test_order(
         &provider,
         alice,
         *origin.address(),
@@ -72,14 +74,21 @@ async fn main() -> eyre::Result<()> {
     let order = Order::try_from(logs)?;
     println!("recovered order: {:?}", order);
 
-    let filler = Filler::new(&provider, destination.address());
+    let filler = Filler::new(
+        &provider,
+        &provider,
+        origin.address(),
+        destination.address(),
+    );
     let tx = filler.fill(order).await?;
     println!("fill tx: {:?}", tx);
+
+    let _ = filler.run().await?;
 
     Ok(())
 }
 
-async fn submit_order<P, T, N>(
+async fn submit_test_order<P, T, N>(
     provider: P,
     signer: PrivateKeySigner,
     origin: Address,

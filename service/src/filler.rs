@@ -1,15 +1,16 @@
 use std::marker::PhantomData;
 
 use alloy::{
-    eips::eip7702::SignedAuthorization,
+    eips::{eip7702::SignedAuthorization, BlockNumberOrTag},
     network::{Ethereum, TransactionBuilder7702},
     primitives::{Address, Bytes, FixedBytes, LogData},
     providers::Provider,
-    rpc::types::Log,
+    rpc::types::{Filter, Log},
     sol_types::SolEvent,
     transports::Transport,
 };
 use eyre::OptionExt;
+use futures_util::StreamExt;
 
 use crate::bindings::{DestinationSettler, OriginSettler};
 
@@ -17,7 +18,7 @@ const OPEN_TOPIC: Option<&FixedBytes<32>> = Some(&OriginSettler::Open::SIGNATURE
 const DELEGATION_TOPIC: Option<&FixedBytes<32>> =
     Some(&OriginSettler::Requested7702Delegation::SIGNATURE_HASH);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Order {
     id: FixedBytes<32>,
     data: Bytes,
@@ -63,7 +64,9 @@ impl TryFrom<&[Log<LogData>]> for Order {
 }
 
 pub struct Filler<'a, P, T> {
-    provider: P,
+    orig_p: P,
+    dest_p: P,
+    origin: &'a Address,
     destination: &'a Address,
     _phantom: PhantomData<T>,
 }
@@ -73,21 +76,49 @@ where
     P: Provider<T, Ethereum>,
     T: Transport + Clone,
 {
-    pub fn new(provider: P, destination: &'a Address) -> Self {
+    pub fn new(orig_p: P, dest_p: P, origin: &'a Address, destination: &'a Address) -> Self {
         Self {
-            provider, // TODO: will need 2 providers
+            orig_p,
+            dest_p,
+            origin,
             destination,
             _phantom: PhantomData,
         }
     }
 
-    pub async fn fill(self, order: Order) -> eyre::Result<FixedBytes<32>> {
-        let destination = DestinationSettler::new(*self.destination, &self.provider);
+    pub async fn run(&self) -> eyre::Result<()> {
+        let filter = Filter::new()
+            .address(*self.origin)
+            .from_block(BlockNumberOrTag::Latest);
+        let sub = self.orig_p.subscribe_logs(&filter).await?;
+        let mut stream = sub.into_stream();
+
+        while let Some(log) = stream.next().await {
+            let Some(hash) = log.transaction_hash else {
+                continue;
+            };
+            let Ok(Some(tx)) = self.orig_p.get_transaction_receipt(hash).await else {
+                continue;
+            };
+            println!("order created by tx: {:?}", tx);
+            let Ok(order) = Order::try_from(tx.inner.logs()) else {
+                continue;
+            };
+
+            println!("filling order: {:?}", order.id);
+            let _ = self.fill(order).await;
+        }
+
+        Ok(())
+    }
+
+    pub async fn fill(&self, order: Order) -> eyre::Result<FixedBytes<32>> {
+        let destination = DestinationSettler::new(*self.destination, &self.dest_p);
         let tx = destination
             .fill(order.id, order.data, Bytes::new())
             .into_transaction_request()
             .with_authorization_list(order.auth_list);
-        let tx = self.provider.send_transaction(tx).await?;
+        let tx = self.orig_p.send_transaction(tx).await?;
 
         Ok(*tx.tx_hash())
     }
