@@ -1,6 +1,7 @@
 use std::u32;
 
 use bindings::{DestinationSettler, MockERC20, OriginSettler, XAccount};
+use calls::{Asset, Call, SignedCrossChainCalls};
 use eyre::OptionExt;
 
 use alloy::{
@@ -16,6 +17,7 @@ use alloy::{
 use OriginSettler::{EIP7702AuthData, ResolvedCrossChainOrder};
 
 mod bindings;
+mod calls;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -62,7 +64,7 @@ async fn main() -> eyre::Result<()> {
     )
     .await?;
 
-    fill_order(tx_hash, origin.address(), &provider).await?;
+    fill_order(tx_hash, destination.address(), &provider).await?;
 
     Ok(())
 }
@@ -81,22 +83,21 @@ where
 {
     let chain_id = provider.get_chain_id().await?;
 
-    let call = OriginSettler::Call {
+    let call = Call {
         target: Address::ZERO,
-        callData: "".into(),
+        data: "".into(),
         value: U256::ZERO,
     };
-    let asset = OriginSettler::Asset {
+    let destination_asset = Asset {
         token,
         amount: U256::ZERO,
     };
-    let user_call = OriginSettler::CallByUser {
-        user: Address::ZERO,
-        asset: asset.clone(),
-        chainId: chain_id,
-        nonce: U256::ZERO,
+    let signed_calls = SignedCrossChainCalls {
         calls: vec![call],
-        signature: "".into(),
+        asset: destination_asset,
+        nonce: provider.get_transaction_count(signer.address()).await?,
+        destination_chain: chain_id,
+        signer: signer.clone(),
     };
 
     let auth = Authorization {
@@ -110,7 +111,17 @@ where
         authlist: vec![auth.try_into()?],
     };
 
-    let order_data: Bytes = (user_call, auth_data, asset).abi_encode_params().into();
+    let origin_asset = Asset {
+        token,
+        amount: U256::ZERO,
+    };
+
+    let data: (
+        OriginSettler::CallByUser,
+        OriginSettler::EIP7702AuthData,
+        OriginSettler::Asset,
+    ) = (signed_calls.try_into()?, auth_data, origin_asset.into());
+    let data: Bytes = data.abi_encode_params().into();
 
     let origin = OriginSettler::new(origin, provider);
     let builder = origin.ORDER_DATA_TYPE_HASH();
@@ -118,7 +129,7 @@ where
 
     let order = OriginSettler::OnchainCrossChainOrder {
         orderDataType: type_hash,
-        orderData: order_data,
+        orderData: data,
         fillDeadline: u32::MAX,
     };
 
@@ -178,15 +189,19 @@ where
     if let Some(order) = order {
         if let Some(id) = id {
             if let Some(delegation) = delegation {
-                // TODO: send fill tx
+                let auth = delegation.try_into()?;
+
                 let tx = destination
-                    .fill(id, order.abi_encode_params().into(), "".into())
+                    .fill(
+                        id,
+                        order.fillInstructions.get(0).unwrap().originData.clone(),
+                        "".into(),
+                    )
                     .into_transaction_request()
-                    .with_authorization_list(delegation.try_into()?);
+                    .with_authorization_list(auth);
 
                 let pending_tx = provider.send_transaction(tx).await?;
-
-                println!("{:?}", pending_tx.tx_hash());
+                println!("fill tx: {:?}", pending_tx.tx_hash());
             }
         }
     }

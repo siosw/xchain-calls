@@ -45,6 +45,8 @@ impl TryInto<OriginSettler::Authorization> for SignedAuthorization {
     }
 }
 
+// TODO: Vec<SignedAuthorization> into AuthData struct
+
 impl TryInto<SignedAuthorization> for &OriginSettler::Authorization {
     type Error = eyre::Error;
     fn try_into(self) -> Result<SignedAuthorization, Self::Error> {
