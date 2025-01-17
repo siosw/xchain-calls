@@ -14,19 +14,18 @@ use alloy::{
     sol_types::{SolEvent, SolValue},
     transports::Transport,
 };
+use filler::{Filler, Order};
 use OriginSettler::{EIP7702AuthData, ResolvedCrossChainOrder};
 
 mod bindings;
 mod calls;
+mod filler;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     // TODO:
-    // - [x] submit order
-    // - [x] listen for submitted orders
-    // - [ ] execute call against settler (with auth data delegation)
-    // - [ ] refactor into separate services
-    //
+    // - [ ] long running filler service
+    // - [ ] submit issue for erc1271 & incorrect pending check
 
     let anvil = Anvil::new().arg("--hardfork").arg("prague").try_spawn()?;
     let alice: PrivateKeySigner = anvil.keys()[0].clone().into();
@@ -64,7 +63,18 @@ async fn main() -> eyre::Result<()> {
     )
     .await?;
 
-    fill_order(tx_hash, destination.address(), &provider).await?;
+    let tx = provider
+        .get_transaction_receipt(tx_hash)
+        .await?
+        .ok_or_eyre("tx not found")?;
+
+    let logs = tx.inner.logs();
+    let order = Order::try_from(logs)?;
+    println!("recovered order: {:?}", order);
+
+    let filler = Filler::new(&provider, destination.address());
+    let tx = filler.fill(order).await?;
+    println!("fill tx: {:?}", tx);
 
     Ok(())
 }
@@ -138,73 +148,4 @@ where
     println!("opened order with tx hash: {}", tx_hash);
 
     Ok(tx_hash)
-}
-
-async fn fill_order<P, T>(
-    tx_hash: FixedBytes<32>,
-    destination: &Address,
-    provider: &P,
-) -> eyre::Result<()>
-where
-    P: Provider<T, Ethereum>,
-    T: Transport + Clone,
-{
-    let destination = DestinationSettler::new(*destination, &provider);
-    let tx = provider
-        .get_transaction_receipt(tx_hash)
-        .await?
-        .ok_or_eyre("tx not found")?;
-
-    // TODO: get order and authlist from tx
-    let logs = tx.inner.logs();
-    println!("total number of events: {:?}", logs.len());
-
-    let mut id: Option<FixedBytes<32>> = None;
-    let mut order: Option<ResolvedCrossChainOrder> = None;
-    let mut delegation: Option<EIP7702AuthData> = None;
-
-    for log in logs {
-        match log.topic0() {
-            Some(&OriginSettler::Open::SIGNATURE_HASH) => {
-                let OriginSettler::Open {
-                    orderId,
-                    resolvedOrder,
-                } = log.log_decode()?.inner.data;
-
-                println!("order id: {}", orderId);
-                id = Some(orderId);
-                order = Some(resolvedOrder);
-            }
-            Some(&OriginSettler::Requested7702Delegation::SIGNATURE_HASH) => {
-                let OriginSettler::Requested7702Delegation { authData } =
-                    log.log_decode()?.inner.data;
-                delegation = Some(authData);
-            }
-            Some(_) => {}
-            None => {}
-        };
-        println!("\tevent from addr: {}", log.inner.address);
-    }
-
-    if let Some(order) = order {
-        if let Some(id) = id {
-            if let Some(delegation) = delegation {
-                let auth = delegation.try_into()?;
-
-                let tx = destination
-                    .fill(
-                        id,
-                        order.fillInstructions.get(0).unwrap().originData.clone(),
-                        "".into(),
-                    )
-                    .into_transaction_request()
-                    .with_authorization_list(auth);
-
-                let pending_tx = provider.send_transaction(tx).await?;
-                println!("fill tx: {:?}", pending_tx.tx_hash());
-            }
-        }
-    }
-
-    Ok(())
 }
