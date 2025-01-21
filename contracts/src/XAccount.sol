@@ -5,6 +5,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {CallByUser, Call} from "./Structs.sol";
 
 /**
@@ -51,11 +52,21 @@ contract XAccount is ReentrancyGuard {
         // @dev address(this) should be the userCall.user's EOA.
         // TODO: Make the blob to sign EIP712-compatible (i.e. instead of keccak256(abi.encode(...)) set
         // this to SigningLib.getTypedDataHash(...)
-        if (
-            !SignatureChecker.isValidSignatureNow(
-                address(this), keccak256(abi.encode(userCalls.calls, userCalls.nonce)), userCalls.signature
-            )
-        ) revert InvalidUserSignature();
+
+        bytes32 hash = keccak256(abi.encode(userCalls.calls, userCalls.nonce));
+        (address recovered, ECDSA.RecoverError err, ) = ECDSA.tryRecover(hash, userCalls.signature);
+
+        if (err != ECDSA.RecoverError.NoError || recovered != address(this)) 
+            revert InvalidUserSignature();
+
+        // TODO: this checks the ERC1271 signature because
+        // codesize of address(this) != 0
+
+        // if (
+        //     !SignatureChecker.isValidSignatureNow(
+        //         address(this), keccak256(abi.encode(userCalls.calls, userCalls.nonce)), userCalls.signature
+        //     )
+        // ) revert InvalidUserSignature();
     }
 
     function _verify7702Delegation() internal {
