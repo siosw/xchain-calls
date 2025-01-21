@@ -18,6 +18,7 @@ use filler::{Filler, Order};
 
 mod bindings;
 mod calls;
+mod chain;
 mod filler;
 
 #[tokio::main]
@@ -86,6 +87,19 @@ async fn main() -> eyre::Result<()> {
     let _ = filler.run().await?;
 
     Ok(())
+}
+
+async fn sign_delegation<S>(signer: S) -> eyre::Result<()>
+where
+    S: Signer,
+{
+    todo!()
+}
+
+#[tokio::test]
+async fn test_end_to_end() -> eyre::Result<()> {
+    // setup configs
+    todo!()
 }
 
 async fn submit_test_order<P, T, N>(
