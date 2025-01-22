@@ -1432,17 +1432,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "filler"
-version = "0.1.0"
-dependencies = [
- "alloy",
- "clap",
- "eyre",
- "futures-util",
- "tokio",
-]
-
-[[package]]
 name = "fixed-hash"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2935,6 +2924,17 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "service"
+version = "0.1.0"
+dependencies = [
+ "alloy",
+ "clap",
+ "eyre",
+ "futures-util",
+ "tokio",
 ]
 
 [[package]]
