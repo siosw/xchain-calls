@@ -1,13 +1,47 @@
+use clap::{Parser, Subcommand};
+// use filler::Filler;
+
 mod bindings;
 mod calls;
 mod chain;
 mod filler;
 
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Fill,
+    Generate,
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    command: Commands,
+
+    #[arg(short, long)]
+    private_key: String,
+
+    config: String,
+}
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    let args = Args::parse();
+
+    // context create from args
+    // context is input to filler / generator
+    // context can also be created from anvil for internal e2e
+
+    match &args.command {
+        Commands::Fill => {
+            // let filler = Filler::new();
+        }
+        Commands::Generate => {}
+    };
+
     // TODO:
     // - [x] long running filler service
-    // - [ ] move current e2e flow into test
+    // - [x] move current e2e flow into test
     // - [ ] cli opts to: generate / fill orders / set up system
     // - [ ] add logging
     // - [ ] submit issue for erc1271 & incorrect pending check
